@@ -180,19 +180,20 @@ configure_custom_rule() {
 
 # --- IPv4 → IPv6 КАСКАД (socat) ---
 configure_ipv4_to_ipv6_rule() {
-    echo -e "\n${CYAN}--- 🔀 IPv4 → IPv6 каскад ---${NC}"
+    local PROTO=$1
+    local PROTO_UPPER=$(echo "$PROTO" | tr '[:lower:]' '[:upper:]')
+
+    echo -e "\n${CYAN}--- 🔀 IPv4 → IPv6 каскад ($PROTO_UPPER) ---${NC}"
     echo -e "${WHITE}Клиент подключается по IPv4 к этому серверу,"
     echo -e "трафик перенаправляется на целевой сервер по IPv6.${NC}\n"
 
-    while true; do
-        echo -e "Выберите протокол (${YELLOW}tcp${NC} или ${YELLOW}udp${NC}):"
-        read -p "> " PROTO
-        if [[ "$PROTO" == "tcp" || "$PROTO" == "udp" ]]; then break; fi
-        echo -e "${RED}Ошибка: введите tcp или udp!${NC}"
-    done
+    local SERVER_IP
+    SERVER_IP=$(curl -s ifconfig.me 2>/dev/null)
+    [ -z "$SERVER_IP" ] && SERVER_IP=$(hostname -I | awk '{print $1}')
+    echo -e "IP этого сервера (IPv4): ${GREEN}${SERVER_IP}${NC}\n"
 
     while true; do
-        echo -e "Введите ${YELLOW}ВХОДЯЩИЙ Порт${NC} (IPv4, на этом сервере):"
+        echo -e "Введите ${YELLOW}ВХОДЯЩИЙ Порт${NC} (на этом сервере, IPv4):"
         read -p "> " IN_PORT
         if [[ "$IN_PORT" =~ ^[0-9]+$ ]] && [ "$IN_PORT" -le 65535 ]; then break; fi
         echo -e "${RED}Ошибка: порт должен быть числом от 1 до 65535!${NC}"
@@ -247,7 +248,7 @@ EOF
     netfilter-persistent save > /dev/null
 
     echo -e "${GREEN}[SUCCESS] IPv4→IPv6 каскад настроен!${NC}"
-    echo -e "$PROTO: Вход ${IN_PORT} (IPv4) -> [${TARGET_IP6}]:${OUT_PORT} (IPv6)"
+    echo -e "$PROTO_UPPER: ${SERVER_IP}:${IN_PORT} (IPv4) -> [${TARGET_IP6}]:${OUT_PORT} (IPv6)"
     read -p "Нажмите Enter для возврата в меню..."
 }
 
@@ -748,7 +749,8 @@ show_menu() {
         echo -e "15) Трафик по портам"
         echo -e "16) Ограничить доступ по IP"
         echo -e "17) Live подключения"
-        echo -e "18) 🔀 ${CYAN}IPv4 → IPv6 каскад${NC} (socat)"
+        echo -e "18) 🔀 ${CYAN}IPv4 → IPv6 каскад UDP${NC} (socat)"
+        echo -e "19) 🔀 ${CYAN}IPv4 → IPv6 каскад TCP${NC} (socat)"
         echo -e "0) Выход"
         echo -e "------------------------------------------------------"
 
@@ -772,7 +774,8 @@ show_menu() {
             15) port_traffic_stats ;;
             16) lock_port_to_ip ;;
             17) live_connections ;;
-            18) configure_ipv4_to_ipv6_rule ;;
+            18) configure_ipv4_to_ipv6_rule "udp" ;;
+            19) configure_ipv4_to_ipv6_rule "tcp" ;;
             0) exit 0 ;;
             *) ;;
         esac
