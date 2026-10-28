@@ -192,6 +192,14 @@ configure_ipv4_to_ipv6_rule() {
     [ -z "$SERVER_IP" ] && SERVER_IP=$(hostname -I | awk '{print $1}')
     echo -e "IP этого сервера (IPv4): ${GREEN}${SERVER_IP}${NC}\n"
 
+    echo -e "${YELLOW}[*] Проверка поддержки IPv6 на этом сервере...${NC}"
+    if ! ip -6 addr show | grep -q "inet6" || ! ping6 -c 1 -W 3 2001:4860:4860::8888 > /dev/null 2>&1; then
+        echo -e "${RED}[ERROR] Этот сервер не поддерживает IPv6 или нет IPv6-связности. Каскад не создан.${NC}"
+        read -p "Нажмите Enter для возврата в меню..."
+        return
+    fi
+    echo -e "${GREEN}[OK] IPv6 на этом сервере работает.${NC}\n"
+
     while true; do
         echo -e "Введите ${YELLOW}Порт${NC} (одинаковый для входа и выхода):"
         read -p "> " IN_PORT
@@ -205,6 +213,14 @@ configure_ipv4_to_ipv6_rule() {
         if [[ "$TARGET_IP6" =~ ^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$ ]]; then break; fi
         echo -e "${RED}Ошибка: введите корректный IPv6 адрес!${NC}"
     done
+
+    echo -e "${YELLOW}[*] Проверка доступности целевого IPv6 адреса [${TARGET_IP6}]...${NC}"
+    if ! ping6 -c 2 -W 4 "$TARGET_IP6" > /dev/null 2>&1; then
+        echo -e "${RED}[ERROR] IPv6 адрес ${TARGET_IP6} недоступен. Каскад не создан.${NC}"
+        read -p "Нажмите Enter для возврата в меню..."
+        return
+    fi
+    echo -e "${GREEN}[OK] Целевой IPv6 адрес доступен.${NC}\n"
 
     local OUT_PORT="$IN_PORT"
 
