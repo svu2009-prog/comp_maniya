@@ -61,9 +61,9 @@ prepare_system() {
 
     # Установка зависимостей
     export DEBIAN_FRONTEND=noninteractive
-    if ! dpkg -s iptables-persistent >/dev/null 2>&1; then
+    if ! dpkg -s iptables-persistent >/dev/null 2>&1 || ! command -v socat >/dev/null 2>&1; then
         apt-get update -y > /dev/null
-        apt-get install -y iptables-persistent netfilter-persistent qrencode > /dev/null
+        apt-get install -y iptables-persistent netfilter-persistent qrencode socat > /dev/null
     fi
 }
 
@@ -178,6 +178,79 @@ configure_custom_rule() {
     apply_iptables_rules "$PROTO" "$IN_PORT" "$OUT_PORT" "$TARGET_IP" "Custom Rule"
 }
 
+# --- IPv4 → IPv6 КАСКАД (socat) ---
+configure_ipv4_to_ipv6_rule() {
+    echo -e "\n${CYAN}--- 🔀 IPv4 → IPv6 каскад ---${NC}"
+    echo -e "${WHITE}Клиент подключается по IPv4 к этому серверу,"
+    echo -e "трафик перенаправляется на целевой сервер по IPv6.${NC}\n"
+
+    while true; do
+        echo -e "Выберите протокол (${YELLOW}tcp${NC} или ${YELLOW}udp${NC}):"
+        read -p "> " PROTO
+        if [[ "$PROTO" == "tcp" || "$PROTO" == "udp" ]]; then break; fi
+        echo -e "${RED}Ошибка: введите tcp или udp!${NC}"
+    done
+
+    while true; do
+        echo -e "Введите ${YELLOW}ВХОДЯЩИЙ Порт${NC} (IPv4, на этом сервере):"
+        read -p "> " IN_PORT
+        if [[ "$IN_PORT" =~ ^[0-9]+$ ]] && [ "$IN_PORT" -le 65535 ]; then break; fi
+        echo -e "${RED}Ошибка: порт должен быть числом от 1 до 65535!${NC}"
+    done
+
+    while true; do
+        echo -e "Введите ${YELLOW}IPv6 адрес${NC} назначения (например: 2001:db8::1):"
+        read -p "> " TARGET_IP6
+        if [[ "$TARGET_IP6" == *:* && -n "$TARGET_IP6" ]]; then break; fi
+        echo -e "${RED}Ошибка: введите корректный IPv6 адрес (должен содержать ':')!${NC}"
+    done
+
+    while true; do
+        echo -e "Введите ${YELLOW}ИСХОДЯЩИЙ Порт${NC} (на IPv6 сервере):"
+        read -p "> " OUT_PORT
+        if [[ "$OUT_PORT" =~ ^[0-9]+$ ]] && [ "$OUT_PORT" -le 65535 ]; then break; fi
+        echo -e "${RED}Ошибка: порт должен быть числом от 1 до 65535!${NC}"
+    done
+
+    local SVC_NAME="socat-ipv6-${IN_PORT}-${PROTO}"
+    local SVC_FILE="/etc/systemd/system/${SVC_NAME}.service"
+
+    if [[ "$PROTO" == "tcp" ]]; then
+        local SOCAT_CMD="socat TCP4-LISTEN:${IN_PORT},bind=0.0.0.0,fork,reuseaddr TCP6:[${TARGET_IP6}]:${OUT_PORT}"
+    else
+        local SOCAT_CMD="socat UDP4-LISTEN:${IN_PORT},bind=0.0.0.0,fork,reuseaddr UDP6:[${TARGET_IP6}]:${OUT_PORT}"
+    fi
+
+    cat > "$SVC_FILE" <<EOF
+[Unit]
+Description=socat IPv4->IPv6 forward port ${IN_PORT}/${PROTO} to [${TARGET_IP6}]:${OUT_PORT}
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${SOCAT_CMD}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable "$SVC_NAME" > /dev/null 2>&1
+    systemctl restart "$SVC_NAME"
+
+    iptables -A INPUT -p "$PROTO" --dport "$IN_PORT" -j ACCEPT
+    if command -v ufw &> /dev/null && ufw status | grep -q "Status: active"; then
+        ufw allow "$IN_PORT"/"$PROTO" >/dev/null
+    fi
+    netfilter-persistent save > /dev/null
+
+    echo -e "${GREEN}[SUCCESS] IPv4→IPv6 каскад настроен!${NC}"
+    echo -e "$PROTO: Вход ${IN_PORT} (IPv4) -> [${TARGET_IP6}]:${OUT_PORT} (IPv6)"
+    read -p "Нажмите Enter для возврата в меню..."
+}
+
 # --- ПРИМЕНЕНИЕ ПРАВИЛ IPTABLES ---
 apply_iptables_rules() {
     local PROTO=$1
@@ -246,6 +319,28 @@ list_active_rules() {
             echo -e "${CYAN}${SERVER_IP}:${l_port}${NC} (${YELLOW}${l_proto}${NC}) -> ${GREEN}${l_dest}${NC}"
         fi
     done
+
+    local has_ipv6=0
+    for svc_file in /etc/systemd/system/socat-ipv6-*.service; do
+        [[ -f "$svc_file" ]] || continue
+        if [[ $has_ipv6 -eq 0 ]]; then
+            echo ""
+            echo -e "${MAGENTA}IPv4 → IPv6 каскады (socat):${NC}"
+            has_ipv6=1
+        fi
+        local svc_name=$(basename "$svc_file" .service)
+        local desc=$(grep -oP '(?<=to \[).*(?=\])' "$svc_file" | head -1)
+        local port=$(echo "$svc_name" | grep -oP '(?<=socat-ipv6-)\d+')
+        local proto=$(echo "$svc_name" | grep -oP '(?<=socat-ipv6-\d{1,5}-).*')
+        local dest_port=$(grep -oP '(?<=\]:)\d+' "$svc_file" | head -1)
+        local status=$(systemctl is-active "$svc_name" 2>/dev/null)
+        if [[ "$status" == "active" ]]; then
+            local status_str="${GREEN}active${NC}"
+        else
+            local status_str="${RED}${status}${NC}"
+        fi
+        echo -e "${CYAN}${SERVER_IP}:${port}${NC} (${YELLOW}${proto}${NC}) -> ${GREEN}[${desc}]:${dest_port}${NC} [$status_str]"
+    done
     echo ""
 
     read -p "Нажмите Enter..."
@@ -255,17 +350,33 @@ list_active_rules() {
 delete_single_rule() {
     echo -e "\n${CYAN}--- Удаление правила ---${NC}"
     declare -a RULES_LIST
+    declare -a RULES_TYPE
     local i=1
+
     while read -r line; do
         l_port=$(echo "$line" | grep -oP '(?<=--dport )\d+')
         l_proto=$(echo "$line" | grep -oP '(?<=-p )\w+')
         l_dest=$(echo "$line" | grep -oP '(?<=--to-destination )[\d\.:]+')
         if [[ -n "$l_port" ]]; then
             RULES_LIST[$i]="$l_port:$l_proto:$l_dest"
+            RULES_TYPE[$i]="iptables"
             echo -e "${YELLOW}[$i]${NC} Вход: $l_port ($l_proto) -> Выход: $l_dest"
             ((i++))
         fi
     done < <(iptables -t nat -S PREROUTING | grep "DNAT")
+
+    for svc_file in /etc/systemd/system/socat-ipv6-*.service; do
+        [[ -f "$svc_file" ]] || continue
+        local svc_name=$(basename "$svc_file" .service)
+        local port=$(echo "$svc_name" | grep -oP '(?<=socat-ipv6-)\d+')
+        local proto=$(echo "$svc_name" | grep -oP '(?<=socat-ipv6-\d{1,5}-).+')
+        local dest_ip=$(grep -oP '(?<=\[)[0-9a-fA-F:]+(?=\])' "$svc_file" | head -1)
+        local dest_port=$(grep -oP '(?<=\]:)\d+' "$svc_file" | head -1)
+        RULES_LIST[$i]="${svc_name}"
+        RULES_TYPE[$i]="socat"
+        echo -e "${YELLOW}[$i]${NC} Вход: $port ($proto) -> IPv6: [${dest_ip}]:${dest_port}"
+        ((i++))
+    done
 
     if [ ${#RULES_LIST[@]} -eq 0 ]; then
         echo -e "${RED}Нет активных правил.${NC}"
@@ -277,25 +388,36 @@ delete_single_rule() {
     read -p "Номер правила для удаления (0 отмена): " rule_num
     if [[ "$rule_num" == "0" || -z "${RULES_LIST[$rule_num]}" ]]; then return; fi
 
-    # Разбираем строку
-    IFS=':' read -r d_port d_proto d_dest <<< "${RULES_LIST[$rule_num]}"
-    local target_ip="${d_dest%:*}"
-    local target_port="${d_dest#*:}"
-    
-    iptables -t nat -D PREROUTING -p "$d_proto" --dport "$d_port" -j DNAT --to-destination "$d_dest" 2>/dev/null
-    iptables -D INPUT -p "$d_proto" --dport "$d_port" -j ACCEPT 2>/dev/null
-    iptables -D FORWARD -p "$d_proto" -d "$target_ip" --dport "$target_port" -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT 2>/dev/null
-    iptables -D FORWARD -p "$d_proto" -s "$target_ip" --sport "$target_port" -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null
-    
-    netfilter-persistent save > /dev/null
-    echo -e "${GREEN}[OK] Правило удалено.${NC}"
+    if [[ "${RULES_TYPE[$rule_num]}" == "socat" ]]; then
+        local svc_name="${RULES_LIST[$rule_num]}"
+        local port=$(echo "$svc_name" | grep -oP '(?<=socat-ipv6-)\d+')
+        local proto=$(echo "$svc_name" | grep -oP '(?<=socat-ipv6-\d{1,5}-).+')
+        systemctl stop "$svc_name" 2>/dev/null
+        systemctl disable "$svc_name" > /dev/null 2>&1
+        rm -f "/etc/systemd/system/${svc_name}.service"
+        systemctl daemon-reload
+        iptables -D INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null
+        netfilter-persistent save > /dev/null
+        echo -e "${GREEN}[OK] IPv4→IPv6 правило удалено.${NC}"
+    else
+        IFS=':' read -r d_port d_proto d_dest <<< "${RULES_LIST[$rule_num]}"
+        local target_ip="${d_dest%:*}"
+        local target_port="${d_dest#*:}"
+        iptables -t nat -D PREROUTING -p "$d_proto" --dport "$d_port" -j DNAT --to-destination "$d_dest" 2>/dev/null
+        iptables -D INPUT -p "$d_proto" --dport "$d_port" -j ACCEPT 2>/dev/null
+        iptables -D FORWARD -p "$d_proto" -d "$target_ip" --dport "$target_port" -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT 2>/dev/null
+        iptables -D FORWARD -p "$d_proto" -s "$target_ip" --sport "$target_port" -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null
+        netfilter-persistent save > /dev/null
+        echo -e "${GREEN}[OK] Правило удалено.${NC}"
+    fi
+
     read -p "Нажмите Enter..."
 }
 
 # --- ПОЛНАЯ ОЧИСТКА ---
 flush_rules() {
     echo -e "\n${RED}!!! ВНИМАНИЕ !!!${NC}"
-    echo "Сброс ВСЕХ настроек iptables."
+    echo "Сброс ВСЕХ настроек iptables и IPv4→IPv6 правил (socat)."
     read -p "Вы уверены? (y/n): " confirm
     if [[ "$confirm" == "y" ]]; then
         iptables -P INPUT ACCEPT
@@ -306,6 +428,16 @@ flush_rules() {
         iptables -F
         iptables -X
         netfilter-persistent save > /dev/null
+
+        for svc_file in /etc/systemd/system/socat-ipv6-*.service; do
+            [[ -f "$svc_file" ]] || continue
+            local svc_name=$(basename "$svc_file" .service)
+            systemctl stop "$svc_name" 2>/dev/null
+            systemctl disable "$svc_name" > /dev/null 2>&1
+            rm -f "$svc_file"
+        done
+        systemctl daemon-reload
+
         echo -e "${GREEN}[OK] Очищено.${NC}"
     fi
     read -p "Нажмите Enter..."
@@ -361,8 +493,23 @@ backup_rules() {
 
     iptables-save > /root/compmaniya-backup.rules
 
+    local ipv6_list="/root/compmaniya-backup-ipv6.list"
+    rm -f "$ipv6_list"
+    for svc_file in /etc/systemd/system/socat-ipv6-*.service; do
+        [[ -f "$svc_file" ]] || continue
+        local svc_name=$(basename "$svc_file" .service)
+        local port=$(echo "$svc_name" | grep -oP '(?<=socat-ipv6-)\d+')
+        local proto=$(echo "$svc_name" | grep -oP '(?<=socat-ipv6-\d{1,5}-).+')
+        local dest_ip=$(grep -oP '(?<=\[)[0-9a-fA-F:]+(?=\])' "$svc_file" | head -1)
+        local dest_port=$(grep -oP '(?<=\]:)\d+' "$svc_file" | head -1)
+        echo "${port}:${proto}:${dest_ip}:${dest_port}" >> "$ipv6_list"
+    done
+
     echo -e "${GREEN}[OK] Backup сохранён:${NC}"
     echo "/root/compmaniya-backup.rules"
+    if [[ -f "$ipv6_list" ]]; then
+        echo "/root/compmaniya-backup-ipv6.list"
+    fi
 
     read -p "Нажмите Enter..."
 }
@@ -380,8 +527,39 @@ restore_rules() {
 
     iptables-restore < /root/compmaniya-backup.rules
     netfilter-persistent save > /dev/null
+    echo -e "${GREEN}[OK] Правила iptables восстановлены.${NC}"
 
-    echo -e "${GREEN}[OK] Правила восстановлены.${NC}"
+    local ipv6_list="/root/compmaniya-backup-ipv6.list"
+    if [[ -f "$ipv6_list" ]]; then
+        while IFS=':' read -r port proto dest_ip dest_port; do
+            [[ -z "$port" ]] && continue
+            local svc_name="socat-ipv6-${port}-${proto}"
+            local svc_file="/etc/systemd/system/${svc_name}.service"
+            if [[ "$proto" == "tcp" ]]; then
+                local socat_cmd="socat TCP4-LISTEN:${port},bind=0.0.0.0,fork,reuseaddr TCP6:[${dest_ip}]:${dest_port}"
+            else
+                local socat_cmd="socat UDP4-LISTEN:${port},bind=0.0.0.0,fork,reuseaddr UDP6:[${dest_ip}]:${dest_port}"
+            fi
+            cat > "$svc_file" <<EOF
+[Unit]
+Description=socat IPv4->IPv6 forward port ${port}/${proto} to [${dest_ip}]:${dest_port}
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${socat_cmd}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+            systemctl daemon-reload
+            systemctl enable "$svc_name" > /dev/null 2>&1
+            systemctl restart "$svc_name"
+            echo -e "${GREEN}[OK] IPv4→IPv6: ${port}/${proto} -> [${dest_ip}]:${dest_port}${NC}"
+        done < "$ipv6_list"
+    fi
 
     read -p "Нажмите Enter..."
 }
@@ -396,7 +574,8 @@ uninstall_script() {
 
     echo "Будет удалено:"
     echo "- все правила iptables"
-    echo "- backup файл"
+    echo "- все IPv4→IPv6 правила (socat сервисы)"
+    echo "- backup файлы"
     echo "- launcher команда compmaniya"
     echo ""
 
@@ -422,10 +601,22 @@ uninstall_script() {
 
     netfilter-persistent save > /dev/null
 
+    echo -e "${YELLOW}[*] Остановка IPv4→IPv6 сервисов...${NC}"
+
+    for svc_file in /etc/systemd/system/socat-ipv6-*.service; do
+        [[ -f "$svc_file" ]] || continue
+        local svc_name=$(basename "$svc_file" .service)
+        systemctl stop "$svc_name" 2>/dev/null
+        systemctl disable "$svc_name" > /dev/null 2>&1
+        rm -f "$svc_file"
+    done
+    systemctl daemon-reload
+
     echo -e "${YELLOW}[*] Удаление файлов...${NC}"
 
     rm -f /usr/local/bin/compmaniya
     rm -f /root/compmaniya-backup.rules
+    rm -f /root/compmaniya-backup-ipv6.list
 
     echo ""
     echo -e "${GREEN}[SUCCESS] Скрипт полностью удалён.${NC}"
@@ -557,6 +748,7 @@ show_menu() {
         echo -e "15) Трафик по портам"
         echo -e "16) Ограничить доступ по IP"
         echo -e "17) Live подключения"
+        echo -e "18) 🔀 ${CYAN}IPv4 → IPv6 каскад${NC} (socat)"
         echo -e "0) Выход"
         echo -e "------------------------------------------------------"
 
@@ -580,6 +772,7 @@ show_menu() {
             15) port_traffic_stats ;;
             16) lock_port_to_ip ;;
             17) live_connections ;;
+            18) configure_ipv4_to_ipv6_rule ;;
             0) exit 0 ;;
             *) ;;
         esac
