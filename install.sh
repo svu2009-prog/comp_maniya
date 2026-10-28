@@ -193,7 +193,7 @@ configure_ipv4_to_ipv6_rule() {
     echo -e "IP этого сервера (IPv4): ${GREEN}${SERVER_IP}${NC}\n"
 
     while true; do
-        echo -e "Введите ${YELLOW}ВХОДЯЩИЙ Порт${NC} (на этом сервере, IPv4):"
+        echo -e "Введите ${YELLOW}Порт${NC} (одинаковый для входа и выхода):"
         read -p "> " IN_PORT
         if [[ "$IN_PORT" =~ ^[0-9]+$ ]] && [ "$IN_PORT" -le 65535 ]; then break; fi
         echo -e "${RED}Ошибка: порт должен быть числом от 1 до 65535!${NC}"
@@ -202,16 +202,11 @@ configure_ipv4_to_ipv6_rule() {
     while true; do
         echo -e "Введите ${YELLOW}IPv6 адрес${NC} назначения (например: 2001:db8::1):"
         read -p "> " TARGET_IP6
-        if [[ "$TARGET_IP6" == *:* && -n "$TARGET_IP6" ]]; then break; fi
-        echo -e "${RED}Ошибка: введите корректный IPv6 адрес (должен содержать ':')!${NC}"
+        if [[ "$TARGET_IP6" =~ ^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$ ]]; then break; fi
+        echo -e "${RED}Ошибка: введите корректный IPv6 адрес!${NC}"
     done
 
-    while true; do
-        echo -e "Введите ${YELLOW}ИСХОДЯЩИЙ Порт${NC} (на IPv6 сервере):"
-        read -p "> " OUT_PORT
-        if [[ "$OUT_PORT" =~ ^[0-9]+$ ]] && [ "$OUT_PORT" -le 65535 ]; then break; fi
-        echo -e "${RED}Ошибка: порт должен быть числом от 1 до 65535!${NC}"
-    done
+    local OUT_PORT="$IN_PORT"
 
     local SVC_NAME="socat-ipv6-${IN_PORT}-${PROTO}"
     local SVC_FILE="/etc/systemd/system/${SVC_NAME}.service"
@@ -248,7 +243,7 @@ EOF
     netfilter-persistent save > /dev/null
 
     echo -e "${GREEN}[SUCCESS] IPv4→IPv6 каскад настроен!${NC}"
-    echo -e "$PROTO_UPPER: ${SERVER_IP}:${IN_PORT} (IPv4) -> [${TARGET_IP6}]:${OUT_PORT} (IPv6)"
+    echo -e "$PROTO_UPPER: ${SERVER_IP}:${IN_PORT} (IPv4) -> [${TARGET_IP6}]:${IN_PORT} (IPv6)"
     read -p "Нажмите Enter для возврата в меню..."
 }
 
