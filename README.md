@@ -19,6 +19,7 @@
     * Поддержка **UDP** (AmneziaWG, WireGuard).
     * Поддержка **TCP** (VLESS, VMess, Reality).
     * Поддержка **MTProto / TProxy** (Telegram).
+* **🌉 IPv4 → IPv6 каскад:** Перенаправление трафика с IPv4-входа на сервер с IPv6-адресом через `socat`. Работает как отдельный `systemd`-сервис с автозапуском после перезагрузки.
 * **🛠 Кастомные правила:** Возможность указывать разные порты для входа и выхода (проброс SSH, RDP и нестандартных сервисов).
 * **🌐 Мульти-туннелирование:** Создавайте 2, 5, 10 соединений на разных портах одновременно.
 * **🧠 Умная настройка:**
@@ -34,7 +35,7 @@
 Подключитесь к вашему VPS (Ubuntu/Debian) под пользователем `root` и выполните одну команду:
 
 ```bash
-wget -O install.sh https://raw.githubusercontent.com/dorofeev200/comp_maniya/main/install.sh && chmod +x install.sh && ./install.sh
+wget -O install.sh https://raw.githubusercontent.com/svu2009-prog/comp_maniya/main/install.sh && chmod +x install.sh && ./install.sh
 ```
 
 ### ⚡ Последующие запуски
