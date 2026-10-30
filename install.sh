@@ -731,7 +731,6 @@ live_connections() {
 # --- МЕНЮ ---
 show_menu() {
     while true; do
-        clear
         echo -e "${MAGENTA}"
         echo "******************************************************"
         echo "           COMP_MANIYA KASKAD PRO"
