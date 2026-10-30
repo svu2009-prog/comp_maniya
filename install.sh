@@ -457,7 +457,6 @@ flush_rules() {
 
 # --- ПРОВЕРКА СОЕДИНЕНИЯ ---
 check_connection() {
-    clear
     echo -e "${CYAN}--- Проверка соединения ---${NC}"
 
     while true; do
@@ -500,7 +499,6 @@ check_connection() {
 
 # --- BACKUP ---
 backup_rules() {
-    clear
     echo -e "${CYAN}--- Создание backup ---${NC}"
 
     iptables-save > /root/compmaniya-backup.rules
@@ -528,7 +526,6 @@ backup_rules() {
 
 # --- RESTORE ---
 restore_rules() {
-    clear
     echo -e "${CYAN}--- Восстановление backup ---${NC}"
 
     if [[ ! -f /root/compmaniya-backup.rules ]]; then
@@ -578,7 +575,6 @@ EOF
 
 # --- ПОЛНОЕ УДАЛЕНИЕ ---
 uninstall_script() {
-    clear
     echo -e "${RED}╔══════════════════════════════════════╗${NC}"
     echo -e "${RED}║      ПОЛНОЕ УДАЛЕНИЕ СКРИПТА         ║${NC}"
     echo -e "${RED}╚══════════════════════════════════════╝${NC}"
@@ -639,7 +635,6 @@ uninstall_script() {
 
 # --- МОНИТОРИНГ VPS ---
 system_status() {
-    clear
     echo -e "${CYAN}╔══════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║         МОНИТОРИНГ VPS               ║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════╝${NC}"
@@ -666,7 +661,6 @@ system_status() {
 
 # --- КРАСИВЫЙ СЧЁТЧИК ТРАФИКА ---
 port_traffic_stats() {
-    clear
     echo -e "${CYAN}╔════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║               ТРАФИК ПО ПРАВИЛАМ KASKAD                  ║${NC}"
     echo -e "${CYAN}╚════════════════════════════════════════════════════════════╝${NC}"
@@ -697,7 +691,6 @@ port_traffic_stats() {
 
 # --- ОГРАНИЧЕНИЕ ПО IP ---
 lock_port_to_ip() {
-    clear
     echo -e "${CYAN}--- Ограничение доступа по IP ---${NC}"
 
     read -p "Введите IP клиента: " CLIENT_IP
@@ -716,7 +709,6 @@ lock_port_to_ip() {
 
 # --- LIVE ПОДКЛЮЧЕНИЯ ---
 live_connections() {
-    clear
     echo -e "${CYAN}╔══════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║          LIVE ПОДКЛЮЧЕНИЯ            ║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════╝${NC}"
