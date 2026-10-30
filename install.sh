@@ -511,10 +511,10 @@ backup_rules() {
         [[ -f "$svc_file" ]] || continue
         local svc_name=$(basename "$svc_file" .service)
         local port=$(echo "$svc_name" | grep -oP '(?<=socat-ipv6-)\d+')
-        local proto=$(echo "$svc_name" | grep -oP '(?<=socat-ipv6-\d{1,5}-).+')
+        local proto=$(echo "$svc_name" | sed 's/socat-ipv6-[0-9]*-//')
         local dest_ip=$(grep -oP '(?<=\[)[0-9a-fA-F:]+(?=\])' "$svc_file" | head -1)
         local dest_port=$(grep -oP '(?<=\]:)\d+' "$svc_file" | head -1)
-        echo "${port}:${proto}:${dest_ip}:${dest_port}" >> "$ipv6_list"
+        echo "${port}|${proto}|${dest_ip}|${dest_port}" >> "$ipv6_list"
     done
 
     echo -e "${GREEN}[OK] Backup сохранён:${NC}"
@@ -543,7 +543,7 @@ restore_rules() {
 
     local ipv6_list="/root/compmaniya-backup-ipv6.list"
     if [[ -f "$ipv6_list" ]]; then
-        while IFS=':' read -r port proto dest_ip dest_port; do
+        while IFS='|' read -r port proto dest_ip dest_port; do
             [[ -z "$port" ]] && continue
             local svc_name="socat-ipv6-${port}-${proto}"
             local svc_file="/etc/systemd/system/${svc_name}.service"
