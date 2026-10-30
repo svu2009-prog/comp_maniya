@@ -787,5 +787,4 @@ show_menu() {
 # --- ЗАПУСК ---
 check_root
 prepare_system
-show_promo
 show_menu
