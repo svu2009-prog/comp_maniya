@@ -343,7 +343,7 @@ list_active_rules() {
         local svc_name=$(basename "$svc_file" .service)
         local desc=$(grep -oP '(?<=to \[).*(?=\])' "$svc_file" | head -1)
         local port=$(echo "$svc_name" | grep -oP '(?<=socat-ipv6-)\d+')
-        local proto=$(echo "$svc_name" | grep -oP '(?<=socat-ipv6-\d{1,5}-).*')
+        local proto=$(echo "$svc_name" | sed 's/socat-ipv6-[0-9]*-//')
         local dest_port=$(grep -oP '(?<=\]:)\d+' "$svc_file" | head -1)
         local status=$(systemctl is-active "$svc_name" 2>/dev/null)
         if [[ "$status" == "active" ]]; then
@@ -381,7 +381,7 @@ delete_single_rule() {
         [[ -f "$svc_file" ]] || continue
         local svc_name=$(basename "$svc_file" .service)
         local port=$(echo "$svc_name" | grep -oP '(?<=socat-ipv6-)\d+')
-        local proto=$(echo "$svc_name" | grep -oP '(?<=socat-ipv6-\d{1,5}-).+')
+        local proto=$(echo "$svc_name" | sed 's/socat-ipv6-[0-9]*-//')
         local dest_ip=$(grep -oP '(?<=\[)[0-9a-fA-F:]+(?=\])' "$svc_file" | head -1)
         local dest_port=$(grep -oP '(?<=\]:)\d+' "$svc_file" | head -1)
         RULES_LIST[$i]="${svc_name}"
