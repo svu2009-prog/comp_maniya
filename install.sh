@@ -188,7 +188,7 @@ configure_ipv4_to_ipv6_rule() {
     echo -e "трафик перенаправляется на целевой сервер по IPv6.${NC}\n"
 
     local SERVER_IP
-    SERVER_IP=$(curl -s ifconfig.me 2>/dev/null)
+    SERVER_IP=$(curl -s -4 ifconfig.me 2>/dev/null)
     [ -z "$SERVER_IP" ] && SERVER_IP=$(hostname -I | awk '{print $1}')
     echo -e "IP этого сервера (IPv4): ${GREEN}${SERVER_IP}${NC}\n"
 
@@ -314,7 +314,7 @@ apply_iptables_rules() {
 list_active_rules() {
     echo -e "\n${CYAN}--- Активные переадресации ---${NC}"
 
-    SERVER_IP=$(curl -s ifconfig.me 2>/dev/null)
+    SERVER_IP=$(curl -s -4 ifconfig.me 2>/dev/null)
     [ -z "$SERVER_IP" ] && SERVER_IP=$(hostname -I | awk '{print $1}')
 
     echo -e "${MAGENTA}Сервер каскада:${NC} ${GREEN}${SERVER_IP}${NC}"
