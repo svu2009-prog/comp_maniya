@@ -37,6 +37,11 @@ check_root() {
 
 # --- ПОДГОТОВКА СИСТЕМЫ ---
 prepare_system() {
+    # Определение реального SSH порта
+    SSH_PORT=$(grep -E "^Port" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1)
+    SSH_PORT=${SSH_PORT:-22}  # Если не найден, используем 22 по умолчанию
+    export SSH_PORT
+
     # Автоматическое создание глобальной команды compmaniya
     if [ "$0" != "/usr/local/bin/compmaniya" ]; then
         cp -f "$0" "/usr/local/bin/compmaniya"
@@ -138,6 +143,14 @@ configure_rule() {
         echo -e "${RED}Ошибка: порт должен быть числом!${NC}"
     done
 
+    # Проверка: запрещаем добавлять правило на TCP SSH порт
+    if [[ "$PROTO" == "tcp" && "$PORT" == "$SSH_PORT" ]]; then
+        echo -e "${RED}[ERROR] ⚠️  ЗАПРЕЩЕНО! Порт $SSH_PORT (SSH) по TCP не может быть использован!${NC}"
+        echo -e "${RED}Это заблокирует ваш доступ к серверу.${NC}"
+        read -p "Нажмите Enter..."
+        return
+    fi
+
     apply_iptables_rules "$PROTO" "$PORT" "$PORT" "$TARGET_IP" "$NAME"
 }
 
@@ -167,6 +180,14 @@ configure_custom_rule() {
         if [[ "$IN_PORT" =~ ^[0-9]+$ ]] && [ "$IN_PORT" -le 65535 ]; then break; fi
         echo -e "${RED}Ошибка: порт должен быть числом!${NC}"
     done
+
+    # Проверка: запрещаем добавлять правило на TCP SSH входящего порта
+    if [[ "$PROTO" == "tcp" && "$IN_PORT" == "$SSH_PORT" ]]; then
+        echo -e "${RED}[ERROR] ⚠️  ЗАПРЕЩЕНО! Входящий порт $SSH_PORT (SSH) по TCP не может быть использован!${NC}"
+        echo -e "${RED}Это заблокирует ваш доступ к серверу.${NC}"
+        read -p "Нажмите Enter..."
+        return
+    fi
 
     while true; do
         echo -e "Введите ${YELLOW}ИСХОДЯЩИЙ Порт${NC} (на конечном сервере):"
@@ -206,6 +227,22 @@ configure_ipv4_to_ipv6_rule() {
         if [[ "$IN_PORT" =~ ^[0-9]+$ ]] && [ "$IN_PORT" -le 65535 ]; then break; fi
         echo -e "${RED}Ошибка: порт должен быть числом от 1 до 65535!${NC}"
     done
+
+    # Проверка: запрещаем добавлять правило на TCP SSH (22)
+    if [[ "$PROTO" == "tcp" && "$IN_PORT" == "22" ]]; then
+        echo -e "${RED}[ERROR] ⚠️  ЗАПРЕЩЕНО! Порт 22 (SSH) по TCP не может быть использован!${NC}"
+        echo -e "${RED}Это заблокирует ваш доступ к серверу.${NC}"
+        read -p "Нажмите Enter..."
+        return
+    fi
+
+    # Проверка: запрещаем добавлять правило на TCP SSH порт
+    if [[ "$PROTO" == "tcp" && "$IN_PORT" == "$SSH_PORT" ]]; then
+        echo -e "${RED}[ERROR] ⚠️  ЗАПРЕЩЕНО! Порт $SSH_PORT (SSH) по TCP не может быть использован!${NC}"
+        echo -e "${RED}Это заблокирует ваш доступ к серверу.${NC}"
+        read -p "Нажмите Enter..."
+        return
+    fi
 
     while true; do
         echo -e "Введите ${YELLOW}IPv6 адрес${NC} назначения (например: 2001:db8::1):"
