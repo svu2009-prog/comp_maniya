@@ -1260,7 +1260,7 @@ delete_single_rule() {
         l_proto=$(echo "$line" | grep -oP '(?<=-p )\w+')
         l_dest=$(echo "$line" | grep -oP '(?<=--to-destination )[\d\.:]+')
         if [[ -n "$l_port" ]]; then
-            RULES_LIST[$i]="$l_port:$l_proto:$l_dest"
+            RULES_LIST[$i]="$l_port|$l_proto|$l_dest"
             RULES_TYPE[$i]="iptables"
             echo -e "${YELLOW}[$i]${NC} Вход: $l_port ($l_proto) -> Выход: $l_dest"
             ((i++))
@@ -1311,7 +1311,7 @@ delete_single_rule() {
         netfilter-persistent save > /dev/null 2>&1 || true
         echo -e "${GREEN}[OK] IPv4→IPv6 правило удалено.${NC}"
     else
-        IFS=':' read -r d_port d_proto d_dest <<< "${RULES_LIST[$rule_num]}"
+        IFS='|' read -r d_port d_proto d_dest <<< "${RULES_LIST[$rule_num]}"
         local target_ip="${d_dest%:*}"
         local target_port="${d_dest#*:}"
         
