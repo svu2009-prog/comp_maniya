@@ -1253,19 +1253,38 @@ delete_single_rule() {
     echo -e "\n${CYAN}--- Удаление правила ---${NC}"
     declare -a RULES_LIST
     declare -a RULES_TYPE
+    declare -a RULES_LINE_NUM
     local i=1
 
+    # Парсинг через -L с --line-numbers для получения номеров строк
     while read -r line; do
-        l_port=$(echo "$line" | grep -oP '(?<=--dport )\d+')
-        l_proto=$(echo "$line" | grep -oP '(?<=-p )\w+')
-        l_dest=$(echo "$line" | grep -oP '(?<=--to-destination )[\d\.:]+')
-        if [[ -n "$l_port" ]]; then
+        # Пропустить заголовок и пустые строки
+        [[ "$line" =~ ^Chain ]] && continue
+        [[ "$line" =~ ^num ]] && continue
+        [[ -z "$line" ]] && continue
+        
+        # Формат: num target prot opt source dest [options]
+        local line_num=$(echo "$line" | awk '{print $1}')
+        local target=$(echo "$line" | awk '{print $2}')
+        local l_proto=$(echo "$line" | awk '{print $3}')
+        
+        # Проверка что это DNAT правило
+        [[ "$target" != "DNAT" ]] && continue
+        
+        # Извлечь порт (dpt:XXXX)
+        local l_port=$(echo "$line" | grep -oP '(?<=dpt:)\d+')
+        
+        # Извлечь назначение (to:IP:PORT)
+        local l_dest=$(echo "$line" | grep -oP '(?<=to:)[\d\.:]+')
+        
+        if [[ -n "$l_port" && -n "$l_dest" && -n "$line_num" ]]; then
             RULES_LIST[$i]="$l_port|$l_proto|$l_dest"
             RULES_TYPE[$i]="iptables"
+            RULES_LINE_NUM[$i]="$line_num"
             echo -e "${YELLOW}[$i]${NC} Вход: $l_port ($l_proto) -> Выход: $l_dest"
             ((i++))
         fi
-    done < <(iptables -t nat -S CM_DNAT_RULES 2>/dev/null | grep "DNAT")
+    done < <(iptables -t nat -L CM_DNAT_RULES --line-numbers -n 2>/dev/null)
 
     for svc_file in /etc/systemd/system/socat-ipv6-*.service; do
         [[ -f "$svc_file" ]] || continue
@@ -1314,14 +1333,52 @@ delete_single_rule() {
         IFS='|' read -r d_port d_proto d_dest <<< "${RULES_LIST[$rule_num]}"
         local target_ip="${d_dest%:*}"
         local target_port="${d_dest#*:}"
+        local line_num="${RULES_LINE_NUM[$rule_num]}"
         
         echo -e "${YELLOW}[*] Удаление правил для ${d_dest}...${NC}"
-        iptables -t nat -D CM_DNAT_RULES -p "$d_proto" --dport "$d_port" -j DNAT --to-destination "$d_dest" 2>/dev/null || true
-        iptables -D CM_INPUT -p "$d_proto" --dport "$d_port" -j ACCEPT 2>/dev/null || true
-        iptables -D CM_FORWARD -p "$d_proto" -d "$target_ip" --dport "$target_port" -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
-        iptables -D CM_FORWARD -p "$d_proto" -s "$target_ip" --sport "$target_port" -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
         
-        # Удалить UFW правило если активен
+        # 1. Удаление DNAT правила
+        local dnat_deleted=false
+        if [[ -n "$line_num" ]]; then
+            # Попытка удалить по номеру строки (основной метод)
+            if iptables -t nat -D CM_DNAT_RULES "$line_num" 2>/dev/null; then
+                dnat_deleted=true
+            fi
+        fi
+        
+        # Fallback: удаление по параметрам (обратная совместимость)
+        if [[ "$dnat_deleted" == false ]]; then
+            iptables -t nat -D CM_DNAT_RULES -p "$d_proto" --dport "$d_port" -j DNAT --to-destination "$d_dest" 2>/dev/null || true
+        fi
+        
+        # 2. Удаление CM_INPUT правила
+        local input_line=$(iptables -L CM_INPUT --line-numbers -n 2>/dev/null | grep -E "$d_proto.*dpt:$d_port" | awk '{print $1}' | head -1)
+        if [[ -n "$input_line" ]]; then
+            iptables -D CM_INPUT "$input_line" 2>/dev/null || \
+            iptables -D CM_INPUT -p "$d_proto" --dport "$d_port" -j ACCEPT 2>/dev/null || true
+        else
+            iptables -D CM_INPUT -p "$d_proto" --dport "$d_port" -j ACCEPT 2>/dev/null || true
+        fi
+        
+        # 3. Удаление CM_FORWARD правила (входящее)
+        local fwd_in_line=$(iptables -L CM_FORWARD --line-numbers -n 2>/dev/null | grep -E "$d_proto.*$target_ip.*dpt:$target_port" | grep "NEW" | awk '{print $1}' | head -1)
+        if [[ -n "$fwd_in_line" ]]; then
+            iptables -D CM_FORWARD "$fwd_in_line" 2>/dev/null || \
+            iptables -D CM_FORWARD -p "$d_proto" -d "$target_ip" --dport "$target_port" -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+        else
+            iptables -D CM_FORWARD -p "$d_proto" -d "$target_ip" --dport "$target_port" -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+        fi
+        
+        # 4. Удаление CM_FORWARD правила (исходящее)
+        local fwd_out_line=$(iptables -L CM_FORWARD --line-numbers -n 2>/dev/null | grep -E "$d_proto.*$target_ip.*spt:$target_port" | grep "ESTABLISHED" | awk '{print $1}' | head -1)
+        if [[ -n "$fwd_out_line" ]]; then
+            iptables -D CM_FORWARD "$fwd_out_line" 2>/dev/null || \
+            iptables -D CM_FORWARD -p "$d_proto" -s "$target_ip" --sport "$target_port" -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+        else
+            iptables -D CM_FORWARD -p "$d_proto" -s "$target_ip" --sport "$target_port" -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+        fi
+        
+        # 5. Удалить UFW правило если активен
         if command -v ufw &> /dev/null && ufw status | grep -q "Status: active"; then
             ufw delete allow "$d_port"/"$d_proto" 2>/dev/null || true
         fi
