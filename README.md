@@ -40,7 +40,7 @@
 Подключитесь к вашему VPS (Ubuntu/Debian) под пользователем `root` и выполните одну команду:
 
 ```bash
-wget -O install.sh https://raw.githubusercontent.com/svu2009-prog/comp_maniya/main/install.sh && sudo bash install.sh
+wget -4 -O install.sh https://raw.githubusercontent.com/svu2009-prog/comp_maniya/main/install.sh && sudo bash install.sh
 ```
 
 ### ⚡ Последующие запуски

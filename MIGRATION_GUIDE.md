@@ -78,7 +78,7 @@ COMP_MANIYA:v3:a1b2c3d4-e5f6-7890:fwd:in
 ```bash
 # Скачать новую версию
 cd /root
-wget -O install.sh https://raw.githubusercontent.com/svu2009-prog/comp_maniya/dev-v3.0/install.sh
+wget -4 -O install.sh https://raw.githubusercontent.com/svu2009-prog/comp_maniya/dev-v3.0/install.sh
 
 # Проверить версию
 bash install.sh --version
@@ -165,7 +165,7 @@ sudo rm -f /var/lib/comp_maniya/migrated_to_v3
 
 # 4. Вернуться к старой версии скрипта (если нужно)
 cd /root
-wget -O install.sh https://raw.githubusercontent.com/svu2009-prog/comp_maniya/main/install.sh
+wget -4 -O install.sh https://raw.githubusercontent.com/svu2009-prog/comp_maniya/main/install.sh
 ```
 
 ## Проверка после миграции
