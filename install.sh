@@ -767,26 +767,6 @@ configure_rule() {
         return 1
     fi
     
-    # Проверка доступности целевого порта
-    echo -e "${YELLOW}[*] Проверка доступности ${TARGET_IP}:${PORT}/${PROTO}...${NC}"
-    if [[ "$PROTO" == "tcp" ]]; then
-        if ! check_tcp_port_reachable "$TARGET_IP" "$PORT"; then
-            echo -e "${YELLOW}[!] TCP порт ${TARGET_IP}:${PORT} не доступен (может быть firewall).${NC}"
-            read -p "Продолжить всё равно? (y/n): " continue_anyway
-            [[ "$continue_anyway" != "y" ]] && return 1
-        else
-            echo -e "${GREEN}[OK] TCP порт доступен${NC}"
-        fi
-    else
-        if ! check_udp_port_reachable "$TARGET_IP" "$PORT"; then
-            echo -e "${YELLOW}[!] UDP порт ${TARGET_IP}:${PORT} может быть не доступен.${NC}"
-            read -p "Продолжить всё равно? (y/n): " continue_anyway
-            [[ "$continue_anyway" != "y" ]] && return 1
-        else
-            echo -e "${GREEN}[OK] UDP порт доступен${NC}"
-        fi
-    fi
-
     apply_iptables_rules "$PROTO" "$PORT" "$PORT" "$TARGET_IP" "$NAME"
 }
 
@@ -832,26 +812,6 @@ configure_rule_with_different_ports() {
         echo -e "${RED}Ошибка: порт должен быть от 1 до 65535!${NC}"
     done
     
-    # Проверка доступности целевого порта
-    echo -e "${YELLOW}[*] Проверка доступности ${TARGET_IP}:${OUT_PORT}/${PROTO}...${NC}"
-    if [[ "$PROTO" == "tcp" ]]; then
-        if ! check_tcp_port_reachable "$TARGET_IP" "$OUT_PORT"; then
-            echo -e "${YELLOW}[!] TCP порт недоступен (может быть firewall).${NC}"
-            read -p "Продолжить? (y/n): " continue_anyway
-            [[ "$continue_anyway" != "y" ]] && return 1
-        else
-            echo -e "${GREEN}[OK] TCP порт доступен${NC}"
-        fi
-    else
-        if ! check_udp_port_reachable "$TARGET_IP" "$OUT_PORT"; then
-            echo -e "${YELLOW}[!] UDP порт может быть недоступен.${NC}"
-            read -p "Продолжить? (y/n): " continue_anyway
-            [[ "$continue_anyway" != "y" ]] && return 1
-        else
-            echo -e "${GREEN}[OK] UDP порт доступен${NC}"
-        fi
-    fi
-
     apply_iptables_rules "$PROTO" "$IN_PORT" "$OUT_PORT" "$TARGET_IP" "$NAME"
 }
 
@@ -912,22 +872,6 @@ configure_custom_rule() {
         echo -e "${RED}Ошибка: порт должен быть от 1 до 65535!${NC}"
     done
     
-    # Проверка доступности целевого порта
-    echo -e "${YELLOW}[*] Проверка доступности ${TARGET_IP}:${OUT_PORT}/${PROTO}...${NC}"
-    if [[ "$PROTO" == "tcp" ]]; then
-        if ! check_tcp_port_reachable "$TARGET_IP" "$OUT_PORT"; then
-            echo -e "${YELLOW}[!] TCP порт недоступен (может быть firewall).${NC}"
-            read -p "Продолжить? (y/n): " continue_anyway
-            [[ "$continue_anyway" != "y" ]] && return 1
-        fi
-    else
-        if ! check_udp_port_reachable "$TARGET_IP" "$OUT_PORT"; then
-            echo -e "${YELLOW}[!] UDP порт может быть недоступен.${NC}"
-            read -p "Продолжить? (y/n): " continue_anyway
-            [[ "$continue_anyway" != "y" ]] && return 1
-        fi
-    fi
-
     apply_iptables_rules "$PROTO" "$IN_PORT" "$OUT_PORT" "$TARGET_IP" "Custom Rule"
 }
 
@@ -1009,23 +953,6 @@ configure_ipv4_to_ipv6_rule() {
         done
     fi
 
-    echo -e "${YELLOW}[*] Проверка доступности целевого IPv6 адреса [${TARGET_IP6}]:${OUT_PORT}/${PROTO}...${NC}"
-    
-    if [[ "$PROTO" == "tcp" ]]; then
-        if ! check_tcp_port_reachable "$TARGET_IP6" "$OUT_PORT"; then
-            echo -e "${YELLOW}[!] TCP порт на IPv6 может быть недоступен.${NC}"
-            read -p "Продолжить? (y/n): " continue_anyway
-            [[ "$continue_anyway" != "y" ]] && return 1
-        fi
-    else
-        if ! check_udp_port_reachable "$TARGET_IP6" "$OUT_PORT"; then
-            echo -e "${YELLOW}[!] UDP порт на IPv6 может быть недоступен.${NC}"
-            read -p "Продолжить? (y/n): " continue_anyway
-            [[ "$continue_anyway" != "y" ]] && return 1
-        fi
-    fi
-    echo -e "${GREEN}[OK] Целевой адрес доступен.${NC}\n"
-
     local SVC_NAME="socat-ipv6-${IN_PORT}-${PROTO}"
     local SVC_FILE="/etc/systemd/system/${SVC_NAME}.service"
 
@@ -1081,6 +1008,32 @@ EOF
     # UFW: допустить только если активен
     if command -v ufw &> /dev/null && ufw status | grep -q "Status: active"; then
         ufw allow "$IN_PORT"/"$PROTO" >/dev/null 2>&1 || true
+    fi
+    
+    # Проверка доступности целевого IPv6 адреса (файрвол уже открыт)
+    echo -e "${YELLOW}[*] Проверка доступности целевого IPv6 адреса [${TARGET_IP6}]:${OUT_PORT}/${PROTO}...${NC}"
+    local port_ok=0
+    if [[ "$PROTO" == "tcp" ]]; then
+        check_tcp_port_reachable "$TARGET_IP6" "$OUT_PORT" && port_ok=1
+    else
+        check_udp_port_reachable "$TARGET_IP6" "$OUT_PORT" && port_ok=1
+    fi
+    if [[ $port_ok -eq 0 ]]; then
+        echo -e "${YELLOW}[!] TCP/UDP порт на IPv6 может быть недоступен.${NC}"
+        read -p "Продолжить? (y/n): " continue_anyway
+        if [[ "$continue_anyway" != "y" ]]; then
+            systemctl stop "$SVC_NAME" >/dev/null 2>&1 || true
+            systemctl disable "$SVC_NAME" >/dev/null 2>&1 || true
+            rm -f "$SVC_FILE"
+            systemctl daemon-reload
+            iptables -D CM_INPUT -p "$PROTO" --dport "$IN_PORT" -j ACCEPT 2>/dev/null || true
+            if command -v ufw &> /dev/null && ufw status | grep -q "Status: active"; then
+                ufw delete allow "$IN_PORT"/"$PROTO" >/dev/null 2>&1 || true
+            fi
+            return 1
+        fi
+    else
+        echo -e "${GREEN}[OK] Целевой адрес доступен.${NC}\n"
     fi
     
     netfilter-persistent save > /dev/null 2>&1 || true
@@ -1178,6 +1131,28 @@ apply_iptables_rules() {
         ufw allow "$in_port/$proto" comment "$marker" >/dev/null 2>&1 || {
             log_warn "UFW: не удалось добавить правило"
         }
+    fi
+    
+    # 7. Проверка доступности целевого порта (файрвол уже открыт)
+    log_info "Проверка доступности ${target_ip}:${out_port}/${proto}..."
+    local port_ok=0
+    if [[ "$proto" == "tcp" ]]; then
+        check_tcp_port_reachable "$target_ip" "$out_port" && port_ok=1
+    else
+        check_udp_port_reachable "$target_ip" "$out_port" && port_ok=1
+    fi
+    if [[ $port_ok -eq 0 ]]; then
+        log_warn "Порт ${target_ip}:${out_port}/${proto} недоступен (возможно, файрвол целевого сервера)."
+        read -p "Продолжить всё равно? (y/n): " continue_anyway
+        if [[ "$continue_anyway" != "y" ]]; then
+            execute_rollback "${rollback_commands[@]}"
+            if command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
+                ufw delete allow "$in_port/$proto" >/dev/null 2>&1 || true
+            fi
+            return 1
+        fi
+    else
+        log_success "[OK] Целевой порт доступен"
     fi
     
     # === ТРАНЗАКЦИЯ COMMIT ===
