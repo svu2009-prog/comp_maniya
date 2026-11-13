@@ -252,6 +252,25 @@ check_port_available_local() {
     return 0  # Порт свободен
 }
 
+check_rule_port_conflict() {
+    local port=$1
+
+    # Проверяем только фактически созданные COMP_MANIYA правила.
+    if iptables -t nat -S CM_DNAT_RULES 2>/dev/null | \
+        grep -Eq -- "(^|[[:space:]])--dport[[:space:]]+$port([[:space:]]|$)"; then
+        return 0
+    fi
+
+    for svc_file in /etc/systemd/system/socat-ipv6-*.service; do
+        [[ -f "$svc_file" ]] || continue
+        if [[ "$(basename "$svc_file")" =~ ^socat-ipv6-${port}-(tcp|udp)\.service$ ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 check_tcp_port_reachable() {
     local ip=$1 port=$2
     
@@ -766,6 +785,12 @@ configure_rule() {
         read -p "Нажмите Enter..."
         return 1
     fi
+
+    if check_rule_port_conflict "$PORT"; then
+        echo -e "${RED}[ERROR] Порт $PORT уже используется в другом правиле COMP_MANIYA!${NC}"
+        read -p "Нажмите Enter..."
+        return 1
+    fi
     
     apply_iptables_rules "$PROTO" "$PORT" "$PORT" "$TARGET_IP" "$NAME"
 }
@@ -799,6 +824,12 @@ configure_rule_with_different_ports() {
     # Проверка занятости локального входящего порта
     if ! check_port_available_local "$IN_PORT" "$PROTO"; then
         echo -e "${RED}[ERROR] Входящий порт $IN_PORT/$PROTO уже используется!${NC}"
+        read -p "Нажмите Enter..."
+        return 1
+    fi
+
+    if check_rule_port_conflict "$IN_PORT"; then
+        echo -e "${RED}[ERROR] Порт $IN_PORT уже используется в другом правиле COMP_MANIYA!${NC}"
         read -p "Нажмите Enter..."
         return 1
     fi
@@ -859,6 +890,12 @@ configure_custom_rule() {
     # Проверка занятости локального входящего порта
     if ! check_port_available_local "$IN_PORT" "$PROTO"; then
         echo -e "${RED}[ERROR] Входящий порт $IN_PORT/$PROTO уже используется!${NC}"
+        read -p "Нажмите Enter..."
+        return 1
+    fi
+
+    if check_rule_port_conflict "$IN_PORT"; then
+        echo -e "${RED}[ERROR] Порт $IN_PORT уже используется в другом правиле COMP_MANIYA!${NC}"
         read -p "Нажмите Enter..."
         return 1
     fi
@@ -924,6 +961,12 @@ configure_ipv4_to_ipv6_rule() {
     # Проверка занятости локального порта
     if ! check_port_available_local "$IN_PORT" "$PROTO"; then
         echo -e "${RED}[ERROR] Порт $IN_PORT/$PROTO уже используется!${NC}"
+        read -p "Нажмите Enter..."
+        return 1
+    fi
+
+    if check_rule_port_conflict "$IN_PORT"; then
+        echo -e "${RED}[ERROR] Порт $IN_PORT уже используется в другом правиле COMP_MANIYA!${NC}"
         read -p "Нажмите Enter..."
         return 1
     fi
@@ -1066,6 +1109,11 @@ apply_iptables_rules() {
     local proto=$1 in_port=$2 out_port=$3 target_ip=$4 name=$5
     local uuid=$(generate_uuid)
     local marker="COMP_MANIYA:v3:$uuid"
+
+    if check_rule_port_conflict "$in_port"; then
+        log_error "Порт $in_port уже используется в другом правиле COMP_MANIYA"
+        return 1
+    fi
     
     log_info "Применение правила: $name"
     log_info "  $proto: $in_port → $target_ip:$out_port"
